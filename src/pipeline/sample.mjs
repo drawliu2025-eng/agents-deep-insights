@@ -24,6 +24,7 @@ export function isSubagent(m) {
 export function isSubstantive(m, { includeSubagents = false } = {}) {
   if (!m) return false;
   if (!includeSubagents && isSubagent(m)) return false;
+  if (m.explicitTask) return m.userMessages >= 1;
   return m.userMessages >= 2 && (m.durationMinutes ?? 0) >= 1;
 }
 

@@ -5,12 +5,13 @@ globalThis.__adi_fs = fs;
 import { version } from './version.mjs';
 import * as codex from './providers/codex.mjs';
 import * as cc from './providers/claude-code.mjs';
+import { readTaskBundle } from './providers/task-bundle.mjs';
 import { aggregateMetas, RULE_THRESHOLD, NOISE_FLOOR } from './pipeline/aggregate.mjs';
 import { renderStats } from './render/stats.mjs';
 import { collect, probeSchema, renderIssue } from './doctor.mjs';
 import { stratifiedSample } from './pipeline/sample.mjs';
 import { aggregateFacets } from './pipeline/aggregate.mjs';
-import { labelWithCodex, compactTranscript } from './pipeline/label.mjs';
+import { labelWithCodex, compactTranscript, labelFingerprint } from './pipeline/label.mjs';
 import { renderHtml } from './render/html.mjs';
 import { synthesize, translateNarrative } from './pipeline/synthesize.mjs';
 import { createHash } from 'node:crypto';
@@ -30,10 +31,7 @@ const CACHE = join(process.env.ADI_CACHE || join(homedir(), '.agents-deep-insigh
 // 现在改任何一处 facet 契约，指纹自动变化，旧缓存自动失效。
 export const SCHEMA_FINGERPRINT = createHash('sha256')
   .update(JSON.stringify(facetSchema())).digest('hex').slice(0, 8);
-const fingerprint = (m) => createHash('sha256')
-  .update(`${SCHEMA_FINGERPRINT}|${m.provider}|${m.id}|${m.userMessages}|${m.toolCalls}|`)
-  .update(compactTranscript(m.transcript || []))
-  .digest('hex').slice(0, 16);
+const fingerprint = labelFingerprint;
 
 const argv = process.argv.slice(2);
 const cmd = argv.find((a) => !a.startsWith('-')) || 'stats';
@@ -43,6 +41,11 @@ const has = (n) => argv.includes(`--${n}`);
 const PROVIDERS = { codex, 'claude-code': cc };
 
 function loadMetas(days, only) {
+  if (flag('input')) {
+    const all = readTaskBundle(String(flag('input')));
+    const since = days > 0 ? Date.now() - days * 864e5 : -Infinity;
+    return { metas: all.filter(m => m.startedAt == null || m.startedAt >= since), used: ['task-bundle'], warnings: [] };
+  }
   const used = [], warnings = [];
   let metas = [];
   for (const [name, p] of Object.entries(PROVIDERS)) {
@@ -67,7 +70,7 @@ function help() {
   adi doctor           环境自检；--issue 输出可直接贴 GitHub 的 markdown
   adi run              完整分析（调用 LLM，消耗你自己的订阅额度）
                        --limit <n>   分析多少个会话，默认 30
-                       --model <m>   指定模型（Codex 版本旧时用 gpt-5.5）
+                       --model <m>   指定模型（此 fork 默认 gpt-6-astra）
                        --out <path>  报告输出路径
                        --no-schema   降级到 prompt-only（不推荐）
                        --no-open     不自动打开浏览器
@@ -75,6 +78,9 @@ function help() {
                        --no-english   不生成英文版（省一次调用）
                        --no-artifacts 不落盘中间产物（默认会落，供复核）
 
+  --input <json>       显式任务证据包（不扫描其他 agent 历史）
+  --runner <name>      codex（默认）| openclaw（Gateway，本地 schema 校验）
+  --agent <id>         Gateway 分析使用当前已授权 agent，必填
   --days <n>           时间窗，默认 30；0 表示全部
   --provider <name>    只用某个数据源：codex | claude-code
   --json               机器可读输出
@@ -125,7 +131,7 @@ async function main() {
 
   if (cmd === 'run') {
     const { metas, used, warnings } = loadMetas(days, only);
-    const withText = metas.filter((m) => (m.transcript || []).length > 1);
+    const withText = metas.filter((m) => (m.transcript || []).length > (m.explicitTask ? 0 : 1));
     if (!withText.length) {
       if (!metas.length) {
         console.error(`\n  近 ${days} 天内没找到任何会话记录。`);
@@ -139,25 +145,29 @@ async function main() {
     }
     const quota = Number(flag('limit', 30));
     const { picked } = stratifiedSample(withText, quota);
-    const model = flag('model');
+    const model = flag('model', 'gpt-6-astra');
+    const runner = flag('runner', 'codex');
+    const agent = flag('agent');
+    if (!['codex','openclaw'].includes(runner)) throw Error('Unsupported --runner');
+    if (runner === 'openclaw' && !agent) throw Error('--runner openclaw requires --agent for the current authorized identity');
     const strict = !has('no-schema');
-    fs.mkdirSync(CACHE, { recursive: true });
+    fs.mkdirSync(CACHE, { recursive: true, mode: 0o700 });
 
     console.log(`\n  分析 ${picked.length} 个会话（从 ${withText.length} 个候选中分层采样）`);
     const byProv = picked.reduce((a, m) => { a[m.provider] = (a[m.provider] || 0) + 1; return a; }, {});
     console.log(`  样本来源: ${Object.entries(byProv).map(([k, v]) => `${k} ${v}`).join(' + ')}`
-      + `${model ? ' · model ' + model : ''}${strict ? ' · strict schema' : ' · prompt-only（降级）'}`);
+      + `${model ? ' · model ' + model : ''}${runner === 'openclaw' ? ' · Gateway + local schema' : strict ? ' · strict schema' : ' · prompt-only（降级）'}`);
     console.log('  会调用 LLM 并消耗你自己的订阅额度。Ctrl-C 可随时中断，已完成的会缓存。\n');
 
     const facets = []; let repairsCount = 0, fresh = 0, cached = 0, failed = 0; let firstErr = null;
     for (let i = 0; i < picked.length; i++) {
       const m = picked[i];
-      const cf = join(CACHE, `${fingerprint(m)}.json`);
+      const cf = join(CACHE, `${fingerprint(m, { model, runner, agent, strict })}.json`);
       let r = null;
       if (fs.existsSync(cf)) { try { r = JSON.parse(fs.readFileSync(cf, 'utf8')); cached++; } catch {} }
       if (!r) {
         process.stdout.write(`  [${i + 1}/${picked.length}] 打标中…\r`);
-        const out = labelWithCodex(m, { model, strict });
+        const out = labelWithCodex(m, { model, strict, runner, agent });
         if (!out.ok) {
           failed++; firstErr ||= out;
           if (failed === 1 && out.code === 'E_CODEX_TOO_OLD') {
@@ -167,8 +177,8 @@ async function main() {
           }
           continue;
         }
-        r = { facet: { ...out.facet, session_id: m.id }, repairs: out.repairs };
-        try { fs.writeFileSync(cf, JSON.stringify(r)); } catch {}
+        r = { facet: { ...out.facet, session_id: m.id }, repairs: out.repairs, receipt: out.receipt || null };
+        try { fs.writeFileSync(cf, JSON.stringify(r), { mode: 0o600 }); } catch {}
         fresh++;
       }
       facets.push({ ...r.facet, session_id: r.facet.session_id || m.id });
@@ -181,7 +191,7 @@ async function main() {
       console.error('  请跑 `adi doctor --issue` 并提 issue。\n');
       process.exitCode = 1; return;
     }
-    const metaAgg = aggregateMetas(metas);
+    const metaAgg = aggregateMetas(picked);
     const facetAgg = aggregateFacets(facets, { metas: picked });
 
     // L5 叙事合成：数字已算好，这一层只把它们写成人话 + 引用具体证据。
@@ -189,7 +199,7 @@ async function main() {
     let narrative = null;
     if (!has('no-narrative')) {
       process.stdout.write('  正在合成叙事…\r');
-      const syn = synthesize(facetAgg, facets, { model, posture: metaAgg });
+      const syn = synthesize(facetAgg, facets, { model, posture: metaAgg, runner, agent });
       if (syn.ok) { narrative = syn.narrative; console.log('  叙事已合成                    '); }
       else {
         console.log(`  叙事合成失败（${syn.code}），退回纯统计报告`);
@@ -202,7 +212,7 @@ async function main() {
     let narrativeEn = null;
     if (narrative && !has('no-english')) {
       process.stdout.write('  正在生成英文版…\r');
-      const tr = translateNarrative(narrative, { model });
+      const tr = translateNarrative(narrative, { model, runner, agent });
       if (tr.ok) { narrativeEn = tr.narrative; console.log('  英文版已生成                  '); }
       else console.log(`  英文版生成失败（${tr.code}），只输出中文`);
     }
@@ -217,8 +227,8 @@ async function main() {
     if (!has('no-artifacts')) {
       const dir = out.replace(/\.html?$/i, '') + '-artifacts';
       try {
-        fs.mkdirSync(dir, { recursive: true });
-        const w = (n, o) => fs.writeFileSync(join(dir, n), JSON.stringify(o, null, 2));
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        const w = (n, o) => fs.writeFileSync(join(dir, n), JSON.stringify(o, null, 2), { mode: 0o600 });
         w('aggregate.json', { meta: metaAgg, facets: facetAgg });
         w('facets.json', facets);
         // 样本清单：只放能对上号的字段，不放正文（正文含业务内容，落盘要用户自己决定）
@@ -230,7 +240,9 @@ async function main() {
         })));
         w('narrative.json', { zh: narrative, en: narrativeEn });
         w('run.json', {
-          version: version(), generatedAt: new Date().toISOString(),
+          version: version(), generatedAt: new Date().toISOString(), model, runner, agent,
+          inputScope: flag('input') ? 'explicit-task-bundle' : 'local-provider',
+          validation: runner === 'openclaw' ? 'local-schema (not server strict)' : (strict ? 'provider-schema' : 'normalized'),
           windowDays: days, providers: used,
           candidates: withText.length, analyzed: picked.length, quota,
           labelFailed: failed, normalizationRepairs: repairsCount,
@@ -243,7 +255,7 @@ async function main() {
     fs.writeFileSync(out, renderHtml({ metaAgg, facetAgg, narrative, narrativeEn, meta: {
       generatedAt: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
       providers: used, windowDays: days, spanDays, version: version(), repairsCount,
-      artifactsDir: artifacts ? artifacts.split(/[\\/]/).pop() : null } }));
+      artifactsDir: artifacts ? artifacts.split(/[\\/]/).pop() : null } }), { mode: 0o600 });
     console.log(`  报告已生成: ${out}`);
     if (artifacts) console.log(`  中间产物: ${artifacts}/  （aggregate / facets / sample-index / narrative / run）`);
     if (failed) console.log(`  ${failed} 个会话打标失败（已跳过）。细节见 \`adi doctor\``);

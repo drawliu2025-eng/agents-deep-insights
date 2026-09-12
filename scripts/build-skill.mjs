@@ -1,0 +1,13 @@
+import { cpSync, existsSync, mkdirSync, copyFileSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const dest = resolve(process.argv[2] || '');
+if (!process.argv[2] || existsSync(dest) || dest.startsWith(root + '/')) throw Error('Supply a new staging directory outside the repository');
+cpSync(join(root, 'skills/agents-deep-insights'), dest, { recursive: true });
+mkdirSync(join(dest, 'references'), { recursive: true });
+copyFileSync(join(root, 'docs/OPENCLAW.md'), join(dest, 'references/openclaw.md'));
+mkdirSync(join(dest, 'runtime'));
+cpSync(join(root, 'src'), join(dest, 'runtime/src'), { recursive: true });
+for (const file of ['package.json','LICENSE']) copyFileSync(join(root, file), join(dest, 'runtime', file));
+console.log(dest);

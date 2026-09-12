@@ -1,7 +1,7 @@
 /** 终端 stats：零 LLM、零网络、零额度。第一入口，必须不可能失败。 */
 const BAR = '█';
 const pad = (s, n) => String(s).padEnd(n);
-const num = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const num = (n) => (n == null ? '未知' : String(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
 function bars(entries, width = 26, top = 8) {
   const list = entries.slice(0, top);
@@ -29,11 +29,12 @@ export function renderStats(a, { providers, windowDays, warnings = [] }) {
   }
   L.push('');
   if (a.toolCalls) {
-    const pct = (a.failureRate * 100).toFixed(1);
+    const pct = a.failureRate == null ? '未知' : (a.failureRate * 100).toFixed(1) + '%';
     const flag = a.failureRate > 0.15 ? '  ← 偏高' : '';
-    L.push(`  工具失败率 ${pct}%（${num(a.toolFailures)}/${num(a.toolCalls)}）${flag}`);
+    L.push(`  工具失败率 ${pct}（${num(a.toolFailures)}/${num(a.toolOutcomesKnown)} 个已知结果；全部调用 ${num(a.toolCalls)}）${flag}`);
   }
-  if (a.interruptions) L.push(`  你打断了 ${num(a.interruptions)} 次`);
+  if (a.interruptions == null) L.push('  中止次数：未知');
+  else if (a.interruptions) L.push(`  记录到中止 ${num(a.interruptions)} 次（原因另行核验）`);
   if (a.medianGap != null) {
     const g = a.medianGap;
     L.push(`  你的响应中位时长 ${g < 60 ? g.toFixed(0) + ' 秒' : (g / 60).toFixed(1) + ' 分钟'}`);

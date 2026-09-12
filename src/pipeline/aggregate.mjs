@@ -67,6 +67,14 @@ export function aggregateMetas(metas) {
   // 按总调用算失败率会低估三分之一。
   a.failureRate = a.toolOutcomesKnown ? a.toolFailures / a.toolOutcomesKnown : 0;
   a.failureRateCoverage = a.toolCalls ? a.toolOutcomesKnown / a.toolCalls : 0;
+  a.measurementCoverage = {};
+  for (const [key, field] of [['interruptions','userInterruptions'],['gitCommits','gitCommits'],['gitPushes','gitPushes']]) {
+    const included = metas.filter(m => !isSubagent(m));
+    const known = included.filter(m => Number.isFinite(m[field])).length;
+    a.measurementCoverage[key] = { known, total: included.length };
+    if (known !== included.length) a[key] = null;
+  }
+  if (!a.toolOutcomesKnown) a.failureRate = null;
   return a;
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "agents-deep-insights",
-  "version": "0.6.1",
+  "version": "0.6.1-astra.1",
   "description": "Turn your local AI coding-agent sessions into an actionable friction report. Analysis runs locally; only redacted excerpts go to the LLM you already configured.",
   "type": "module",
   "bin": {
@@ -10,13 +10,17 @@
     "src",
     "docs/DESIGN.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "skills",
+    "scripts",
+    "docs/ASTRA.md",
+    "docs/OPENCLAW.md"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test tests/normalize.test.mjs tests/redact.test.mjs tests/sample.test.mjs tests/external-findings.test.mjs tests/collab-mode.test.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "keywords": [
     "codex",
@@ -29,10 +33,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gmggyyds/agents-deep-insights.git"
+    "url": "git+https://github.com/drawliu2025-eng/agents-deep-insights.git"
   },
-  "homepage": "https://github.com/gmggyyds/agents-deep-insights#readme",
+  "homepage": "https://github.com/drawliu2025-eng/agents-deep-insights#readme",
   "bugs": {
-    "url": "https://github.com/gmggyyds/agents-deep-insights/issues"
+    "url": "https://github.com/drawliu2025-eng/agents-deep-insights/issues"
   }
 }

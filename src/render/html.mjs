@@ -158,8 +158,8 @@ only redacted session excerpts are sent to the model you configured yourself</p>
 <div class="cards">
 ${[[metaAgg.sessions, '你参与的会话', 'Your sessions'],
    [facetAgg.n, '深度分析', 'Deeply analyzed'],
-   [`${(metaAgg.failureRate * 100).toFixed(1)}%`, '工具失败率', 'Tool failure rate'],
-   [metaAgg.gitCommits, '提交次数', 'Commits']].map(([v, zh, en]) =>
+   [metaAgg.failureRate == null ? '未知 / unknown' : `${(metaAgg.failureRate * 100).toFixed(1)}%`, '工具失败率', 'Tool failure rate'],
+   [metaAgg.gitCommits ?? '未知 / unknown', '提交次数', 'Commits']].map(([v, zh, en]) =>
 `<div class="card"><b>${v}</b><span class="zh">${zh}</span>${BI ? `<span class="en">${en}</span>` : ''}</div>`).join('')}
 </div>
 

@@ -1,3 +1,5 @@
+> Astra/OpenClaw fork: [changes](docs/ASTRA.md) · [explicit-task input and skill installation](docs/OPENCLAW.md). Upstream attribution and documentation follow.
+
 <div align="center">
 
 <img src="./banner.png" alt="agents-deep-insights" width="100%">
